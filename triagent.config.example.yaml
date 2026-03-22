@@ -1,0 +1,75 @@
+# TriAgent Configuration
+# Place this file as triagent.config.yaml in your project root
+
+agents:
+  claude:
+    command: claude
+    args:
+      - "--dangerously-skip-permissions"
+      - "-p"
+    strengths:
+      - frontend
+      - design
+      - planning
+    max_concurrent: 1
+    health_check:
+      command: claude
+      args: ["--version"]
+    auth_check:
+      command: claude
+      args: ["-p", "respond OK", "--max-turns", "1"]
+
+  forge:
+    command: forge
+    args:
+      - "--dangerously-skip-permissions"
+      - "-p"
+    strengths:
+      - backend
+      - architecture
+      - refactoring
+    max_concurrent: 1
+    health_check:
+      command: forge
+      args: ["--version"]
+    auth_check:
+      command: forge
+      args: ["-p", "respond OK", "--max-turns", "1"]
+
+  codex:
+    command: codex
+    args:
+      - "--dangerously-skip-permissions"
+      - "-p"
+    strengths:
+      - testing
+      - docs
+      - ci-cd
+      - apis
+      - config
+    max_concurrent: 1
+    health_check:
+      command: codex
+      args: ["--version"]
+    auth_check:
+      command: codex
+      args: ["-p", "respond OK", "--max-turns", "1"]
+
+git:
+  worktree_dir: .triagent/worktrees
+  branch_prefix: triagent/
+  auto_merge: true
+  merge_strategy: sequential
+
+session:
+  require_approval: true
+  log_dir: .triagent/logs
+  max_retries: 2
+  tui_refresh_ms: 100
+
+# Optional: explicit path-to-agent mapping (overrides strength-based routing)
+# domains:
+#   "src/frontend/**": claude
+#   "src/api/**": forge
+#   "tests/**": codex
+#   ".github/**": codex
