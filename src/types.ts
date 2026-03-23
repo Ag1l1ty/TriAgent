@@ -40,7 +40,9 @@ export interface TriAgentConfig {
   session: {
     require_approval: boolean;
     log_dir: string;
+    state_dir: string;
     max_retries: number;
+    task_timeout_ms: number;
     tui_refresh_ms: number;
   };
   domains?: Record<string, string>;

@@ -28,7 +28,9 @@ export const configSchema = z.object({
   session: z.object({
     require_approval: z.boolean().default(true),
     log_dir: z.string().default('.triagent/logs'),
+    state_dir: z.string().default('.triagent/sessions'),
     max_retries: z.number().int().nonnegative().default(2),
+    task_timeout_ms: z.number().int().positive().default(300000),
     tui_refresh_ms: z.number().int().positive().default(100),
   }),
   domains: z.record(z.string(), z.string()).optional(),

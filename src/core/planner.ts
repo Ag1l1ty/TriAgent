@@ -1,71 +1,185 @@
 import type { SubTask } from '../types.js';
 
-const DOMAIN_KEYWORDS: Record<string, string[]> = {
-  frontend: ['react', 'component', 'ui', 'css', 'html', 'page', 'form', 'dashboard', 'layout', 'style', 'design', 'navbar', 'sidebar', 'modal', 'button', 'frontend', 'next.js', 'tailwind', 'view'],
-  backend: ['api', 'endpoint', 'route', 'middleware', 'database', 'db', 'schema', 'model', 'migration', 'server', 'auth', 'jwt', 'token', 'session', 'controller', 'service', 'backend', 'fastapi', 'express', 'rest', 'graphql'],
-  testing: ['test', 'spec', 'e2e', 'unit test', 'integration test', 'coverage', 'mock', 'fixture', 'vitest', 'jest', 'pytest', 'testing'],
-  'ci-cd': ['ci', 'cd', 'pipeline', 'github actions', 'deploy', 'docker', 'dockerfile', 'workflow', 'ci/cd', 'ci-cd'],
-  docs: ['readme', 'documentation', 'docs', 'jsdoc', 'changelog', 'guide'],
-  config: ['config', 'configuration', 'env', 'environment', 'setup', 'install', 'scaffold'],
+type DomainName = 'frontend' | 'backend' | 'testing' | 'ci-cd' | 'docs' | 'config';
+
+interface DomainDefinition {
+  keywords: string[];
+  pathHints: string[];
+  taskLabel: string;
+}
+
+const DOMAIN_DEFINITIONS: Record<DomainName, DomainDefinition> = {
+  frontend: {
+    keywords: ['react', 'component', 'ui', 'css', 'html', 'page', 'form', 'dashboard', 'layout', 'style', 'design', 'navbar', 'sidebar', 'modal', 'button', 'frontend', 'next.js', 'tailwind', 'view', 'client'],
+    pathHints: ['src/components/App.tsx', 'src/frontend/index.tsx', 'app/page.tsx', 'pages/index.tsx'],
+    taskLabel: 'frontend implementation',
+  },
+  backend: {
+    keywords: ['api', 'endpoint', 'route', 'middleware', 'database', 'db', 'schema', 'model', 'migration', 'server', 'auth', 'jwt', 'token', 'session', 'controller', 'service', 'backend', 'fastapi', 'express', 'rest', 'graphql'],
+    pathHints: ['src/api/index.ts', 'src/server/index.ts', 'server/app.ts', 'app/api/route.ts'],
+    taskLabel: 'backend implementation',
+  },
+  testing: {
+    keywords: ['test', 'spec', 'e2e', 'unit test', 'integration test', 'coverage', 'mock', 'fixture', 'vitest', 'jest', 'pytest', 'testing'],
+    pathHints: ['tests/app.test.ts', 'src/__tests__/app.test.ts'],
+    taskLabel: 'test coverage',
+  },
+  'ci-cd': {
+    keywords: ['ci', 'cd', 'pipeline', 'github actions', 'deploy', 'docker', 'dockerfile', 'workflow', 'ci/cd', 'ci-cd'],
+    pathHints: ['.github/workflows/ci.yml', 'Dockerfile'],
+    taskLabel: 'CI/CD automation',
+  },
+  docs: {
+    keywords: ['readme', 'documentation', 'docs', 'jsdoc', 'changelog', 'guide'],
+    pathHints: ['README.md', 'docs/guide.md'],
+    taskLabel: 'documentation',
+  },
+  config: {
+    keywords: ['config', 'configuration', 'env', 'environment', 'setup', 'install', 'scaffold'],
+    pathHints: ['package.json', '.env.example', 'tsconfig.json'],
+    taskLabel: 'configuration',
+  },
 };
 
-function classifyDomain(text: string): string {
+const DOMAIN_ORDER: DomainName[] = ['frontend', 'backend', 'testing', 'ci-cd', 'docs', 'config'];
+const EXPLICIT_PATH_PATTERN = /(?:\.?[\w-]+\/)+[\w./-]+|README\.md|Dockerfile|package\.json|tsconfig\.json|vitest\.config\.[\w.]+|\.github\/[\w./-]+|\.env(?:\.[\w-]+)?/gi;
+const SEGMENT_SPLITTER = /\s*(?:,|;|\band then\b|\bthen\b|\band\b|\bplus\b|\balso\b)\s*/gi;
+
+function countKeywordMatches(text: string, keywords: string[]): number {
   const lower = text.toLowerCase();
-  const scores: Record<string, number> = {};
-  for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS)) {
-    scores[domain] = keywords.filter((k) => lower.includes(k)).length;
+  return keywords.reduce((score, keyword) => {
+    if (keyword.includes('.') || keyword.includes('/')) {
+      return score + (lower.includes(keyword) ? 1 : 0);
+    }
+
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return score + (new RegExp(`\\b${escaped}\\b`, 'i').test(text) ? 1 : 0);
+  }, 0);
+}
+
+function scoreDomains(text: string): Array<{ domain: DomainName; score: number }> {
+  return DOMAIN_ORDER.map((domain) => ({
+    domain,
+    score: countKeywordMatches(text, DOMAIN_DEFINITIONS[domain].keywords),
+  })).sort((a, b) => b.score - a.score);
+}
+
+function classifyDomain(text: string): DomainName {
+  const [best] = scoreDomains(text);
+  return best && best.score > 0 ? best.domain : 'backend';
+}
+
+function inferDomains(text: string): DomainName[] {
+  const scored = scoreDomains(text);
+  const strongDomains = scored.filter(({ score }) => score > 0);
+
+  if (strongDomains.length === 0) {
+    return ['backend'];
   }
-  const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
-  return best[1] > 0 ? best[0] : 'backend';
+
+  const maxScore = strongDomains[0].score;
+  return strongDomains
+    .filter(({ score }) => score >= Math.max(1, maxScore - 1))
+    .map(({ domain }) => domain);
+}
+
+function extractTargetPaths(text: string, domains: DomainName[]): string[] | undefined {
+  const explicit = text.match(EXPLICIT_PATH_PATTERN)?.map((match) => match.replace(/[),.;:]+$/, '')) ?? [];
+  const hints = domains.flatMap((domain) => DOMAIN_DEFINITIONS[domain].pathHints);
+  const paths = [...new Set([...explicit, ...hints])];
+  return paths.length > 0 ? paths : undefined;
+}
+
+function cleanSegment(segment: string): string {
+  return segment
+    .replace(/^\s*(implement|build|create|add|fix|update|write)\s+/i, (match) => match.trimEnd() + ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function splitIntoSegments(task: string): string[] {
-  const connectors = /\b(and then|and|with|plus|also|then)\b/gi;
-  const segments = task.split(connectors).filter((s) => !connectors.test(s) && s.trim());
+  const segments = task
+    .split(SEGMENT_SPLITTER)
+    .map((segment) => cleanSegment(segment))
+    .filter(Boolean);
 
-  if (segments.length <= 1) {
-    const domains = new Set<string>();
-    for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS)) {
-      if (keywords.some((k) => task.toLowerCase().includes(k))) {
-        domains.add(domain);
-      }
-    }
-    if (domains.size > 1) {
-      return [...domains].map((d) => `${d}: ${task}`);
-    }
+  return segments.length > 0 ? segments : [cleanSegment(task)];
+}
+
+function buildGeneratedDescription(domain: DomainName, task: string): string {
+  const label = DOMAIN_DEFINITIONS[domain].taskLabel;
+  const normalizedTask = task.trim().replace(/[.]+$/, '');
+  return `Implement ${label} for: ${normalizedTask}`;
+}
+
+function expandSegments(segments: string[], originalTask: string): Array<{ description: string; domain: DomainName; targetPaths?: string[] }> {
+  if (segments.length > 1) {
+    return segments.map((segment) => {
+      const inferredDomains = inferDomains(segment);
+      const domain = classifyDomain(segment);
+      return {
+        description: segment,
+        domain,
+        targetPaths: extractTargetPaths(segment, inferredDomains),
+      };
+    });
   }
 
-  return segments.length > 0 ? segments.map((s) => s.trim()) : [task];
+  const inferredDomains = inferDomains(originalTask);
+  if (inferredDomains.length <= 1) {
+    const only = inferredDomains[0] ?? 'backend';
+    return [{
+      description: originalTask.trim(),
+      domain: only,
+      targetPaths: extractTargetPaths(originalTask, inferredDomains),
+    }];
+  }
+
+  return inferredDomains
+    .filter((domain) => domain !== 'testing')
+    .map((domain) => ({
+      description: buildGeneratedDescription(domain, originalTask),
+      domain,
+      targetPaths: extractTargetPaths(originalTask, [domain]),
+    }));
 }
 
 let counter = 0;
 
 export function decompose(task: string): SubTask[] {
   counter = 0;
-  const segments = splitIntoSegments(task);
-  const subtasks: SubTask[] = segments.map((seg) => ({
+  const normalizedTask = task.trim();
+  const expanded = expandSegments(splitIntoSegments(normalizedTask), normalizedTask);
+
+  const subtasks: SubTask[] = expanded.map((entry) => ({
     id: `task-${++counter}`,
-    description: seg.trim(),
-    domain: classifyDomain(seg),
+    description: entry.description,
+    domain: entry.domain,
+    targetPaths: entry.targetPaths,
     dependsOn: [],
     status: 'pending',
   }));
 
-  const hasTestTask = subtasks.some((t) => t.domain === 'testing');
-  if (!hasTestTask && subtasks.length > 1) {
-    const implIds = subtasks.map((t) => t.id);
+  const hasImplementationTask = subtasks.some((entry) => entry.domain !== 'testing');
+  const hasExplicitTestTask = subtasks.some((entry) => entry.domain === 'testing');
+
+  if (hasImplementationTask && !hasExplicitTestTask) {
+    const implementationIds = subtasks.filter((entry) => entry.domain !== 'testing').map((entry) => entry.id);
     subtasks.push({
       id: `task-${++counter}`,
-      description: `Write tests for: ${task}`,
+      description: `Add or update tests for: ${normalizedTask}`,
       domain: 'testing',
-      dependsOn: implIds,
+      targetPaths: extractTargetPaths(normalizedTask, ['testing']),
+      dependsOn: implementationIds,
       status: 'pending',
     });
   }
 
-  for (const t of subtasks) {
-    if (t.domain === 'testing' && t.dependsOn.length === 0) {
-      t.dependsOn = subtasks.filter((s) => s.domain !== 'testing').map((s) => s.id);
+  for (const taskEntry of subtasks) {
+    if (taskEntry.domain === 'testing' && taskEntry.dependsOn.length === 0) {
+      taskEntry.dependsOn = subtasks
+        .filter((entry) => entry.id !== taskEntry.id && entry.domain !== 'testing')
+        .map((entry) => entry.id);
     }
   }
 

@@ -8,6 +8,7 @@ describe('Session', () => {
     const bus = new TriAgentEventBus({ logging: true });
     const session = new Session({ config: DEFAULT_CONFIG, bus, repoDir: '/tmp/test', task: 'Build login' });
     expect(session.getPhase()).toBe('init');
+    expect(session.getSessionId()).toBeTruthy();
   });
 
   it('should produce assigned subtasks after plan()', () => {

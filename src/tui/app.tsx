@@ -3,26 +3,53 @@ import { Box } from 'ink';
 import { AgentPanel } from './agent-panel.js';
 import { TaskPanel } from './task-panel.js';
 import { StatusBar } from './status-bar.js';
+import { Approval } from './approval.js';
+import { useTriAgentState } from './state.js';
 import type { TriAgentEventBus } from '../core/event-bus.js';
-import type { SubTask, SessionPhase } from '../types.js';
 
 interface AppProps {
   bus: TriAgentEventBus;
   agents: string[];
-  tasks: SubTask[];
-  phase: SessionPhase;
+  requiresApproval?: boolean;
+  onApprove?: () => void;
+  onReject?: () => void;
 }
 
-export function App({ agents, tasks, phase }: AppProps) {
+export function App({ bus, agents, requiresApproval = false, onApprove, onReject }: AppProps) {
+  const state = useTriAgentState(bus, agents);
+  const [approvalPending, setApprovalPending] = React.useState(requiresApproval);
+
+  React.useEffect(() => {
+    setApprovalPending(requiresApproval);
+  }, [requiresApproval]);
+
   return (
     <Box flexDirection="column">
       <Box>
         {agents.map((agent) => (
-          <AgentPanel key={agent} name={agent} status="idle" lines={[]} />
+          <AgentPanel
+            key={agent}
+            name={agent}
+            status={state.agents[agent]?.status ?? 'idle'}
+            lines={state.agents[agent]?.lines ?? []}
+          />
         ))}
       </Box>
-      <TaskPanel tasks={tasks} />
-      <StatusBar phase={phase} agentCount={agents.length} />
+      {approvalPending && onApprove && onReject && (
+        <Approval
+          tasks={state.tasks}
+          onApprove={() => {
+            setApprovalPending(false);
+            onApprove();
+          }}
+          onReject={() => {
+            setApprovalPending(false);
+            onReject();
+          }}
+        />
+      )}
+      <TaskPanel tasks={state.tasks} />
+      <StatusBar phase={state.phase} agentCount={agents.length} requiresApproval={approvalPending} />
     </Box>
   );
 }

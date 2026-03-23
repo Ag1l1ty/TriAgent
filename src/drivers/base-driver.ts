@@ -8,6 +8,7 @@ interface DriverOptions {
   cwd: string;
   bus: TriAgentEventBus;
   refreshMs: number;
+  timeoutMs?: number;
   authErrorPatterns?: RegExp[];
 }
 
@@ -18,10 +19,13 @@ export class BaseDriver {
   protected cwd: string;
   protected bus: TriAgentEventBus;
   protected refreshMs: number;
+  protected timeoutMs: number | null;
   protected authErrorPatterns: RegExp[];
   protected process: { pid: number; kill: (signal?: string) => void } | null = null;
   private buffer: string[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private timedOut = false;
 
   constructor(options: DriverOptions) {
     this.name = options.name;
@@ -30,6 +34,7 @@ export class BaseDriver {
     this.cwd = options.cwd;
     this.bus = options.bus;
     this.refreshMs = options.refreshMs;
+    this.timeoutMs = options.timeoutMs ?? null;
     this.authErrorPatterns = options.authErrorPatterns ?? [
       /authentication required/i,
       /session expired/i,
@@ -40,6 +45,7 @@ export class BaseDriver {
 
   async start(taskDescription: string): Promise<number> {
     const fullArgs = [...this.args, taskDescription].filter(Boolean);
+    this.timedOut = false;
 
     try {
       const pty = await import('node-pty');
@@ -66,6 +72,7 @@ export class BaseDriver {
       this.process = { pid: proc.pid, kill: (sig?: string) => proc.kill(sig) };
       this.bus.emit('agent:status', { type: 'agent:status', agent: this.name, status: 'working' });
       this.flushTimer = setInterval(() => this.flushBuffer(), this.refreshMs);
+      this.armTimeout();
 
       proc.onData((data: string) => {
         const lines = data.split('\n').filter(Boolean);
@@ -77,12 +84,13 @@ export class BaseDriver {
       proc.onExit(({ exitCode: rawCode }) => {
         const exitCode = rawCode ?? 1;
         this.flushBuffer();
-        if (this.flushTimer) clearInterval(this.flushTimer);
+        this.clearTimers();
 
         if (exitCode !== 0) {
           this.bus.emit('agent:error', {
             type: 'agent:error', agent: this.name,
-            error: `Process exited with code ${exitCode}`, isAuthError: false,
+            error: this.timedOut ? `Process timed out after ${this.timeoutMs}ms` : `Process exited with code ${exitCode}`,
+            isAuthError: false,
           });
         }
 
@@ -109,6 +117,7 @@ export class BaseDriver {
 
       this.bus.emit('agent:status', { type: 'agent:status', agent: this.name, status: 'working' });
       this.flushTimer = setInterval(() => this.flushBuffer(), this.refreshMs);
+      this.armTimeout();
 
       proc.stdout?.on('data', (d: Buffer) => {
         const lines = d.toString().split('\n').filter(Boolean);
@@ -125,13 +134,14 @@ export class BaseDriver {
       });
 
       proc.on('close', (code: number | null) => {
-        const exitCode = code ?? 1;
+        const exitCode = this.timedOut ? 124 : (code ?? 1);
         this.flushBuffer();
-        if (this.flushTimer) clearInterval(this.flushTimer);
+        this.clearTimers();
         if (exitCode !== 0) {
           this.bus.emit('agent:error', {
             type: 'agent:error', agent: this.name,
-            error: `Process exited with code ${exitCode}`, isAuthError: false,
+            error: this.timedOut ? `Process timed out after ${this.timeoutMs}ms` : `Process exited with code ${exitCode}`,
+            isAuthError: false,
           });
         }
         this.bus.emit('agent:status', {
@@ -180,6 +190,35 @@ export class BaseDriver {
   kill(): void {
     if (this.process?.pid) {
       process.kill(this.process.pid, 'SIGTERM');
+    }
+  }
+
+  private armTimeout(): void {
+    if (!this.timeoutMs) {
+      return;
+    }
+
+    this.timeoutTimer = setTimeout(() => {
+      this.timedOut = true;
+      this.bus.emit('agent:error', {
+        type: 'agent:error',
+        agent: this.name,
+        error: `Process timed out after ${this.timeoutMs}ms`,
+        isAuthError: false,
+      });
+      this.kill();
+    }, this.timeoutMs);
+  }
+
+  private clearTimers(): void {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
     }
   }
 }

@@ -1,6 +1,12 @@
 import { minimatch } from 'minimatch';
 import type { SubTask, TriAgentConfig, AgentName } from '../types.js';
 
+interface CandidateScore {
+  agent: AgentName;
+  score: number;
+  load: number;
+}
+
 export class Scheduler {
   private config: TriAgentConfig;
 
@@ -9,26 +15,71 @@ export class Scheduler {
   }
 
   assign(tasks: SubTask[]): SubTask[] {
-    return tasks.map((task) => ({ ...task, assignedTo: this.routeTask(task) }));
+    const assignedCounts = new Map<AgentName, number>();
+
+    return tasks.map((task) => {
+      const assignedTo = this.routeTask(task, assignedCounts);
+      assignedCounts.set(assignedTo, (assignedCounts.get(assignedTo) ?? 0) + 1);
+      return { ...task, assignedTo };
+    });
   }
 
-  private routeTask(task: SubTask): AgentName {
-    // Priority 1: Path-based routing
-    if (this.config.domains && task.targetPaths?.length) {
-      for (const [glob, agent] of Object.entries(this.config.domains)) {
-        for (const p of task.targetPaths) {
-          if (minimatch(p, glob)) return agent;
+  private routeTask(task: SubTask, assignedCounts: Map<AgentName, number>): AgentName {
+    const candidates = Object.entries(this.config.agents).map(([agentName, agentConfig]) => {
+      const currentLoad = assignedCounts.get(agentName) ?? 0;
+      const maxConcurrent = Math.max(1, agentConfig.max_concurrent);
+      const loadRatio = currentLoad / maxConcurrent;
+      let score = 0;
+
+      if (this.config.domains && task.targetPaths?.length) {
+        const matchedPaths = Object.entries(this.config.domains).some(([glob, configuredAgent]) =>
+          configuredAgent === agentName &&
+          task.targetPaths!.some((path) => minimatch(path, glob))
+        );
+
+        if (matchedPaths) {
+          score += 100;
         }
       }
-    }
 
-    // Priority 2: Strength-based routing
-    for (const [agentName, agentConfig] of Object.entries(this.config.agents)) {
-      if (agentConfig.strengths.includes(task.domain)) return agentName;
-    }
+      if (agentConfig.strengths.includes(task.domain)) {
+        score += 50;
+      }
 
-    // Priority 3: Fallback
-    return Object.keys(this.config.agents)[0];
+      if (task.targetPaths?.some((path) => path.includes('tests')) && agentConfig.strengths.includes('testing')) {
+        score += 15;
+      }
+
+      if (task.targetPaths?.some((path) => path.includes('docs') || path.includes('README')) && agentConfig.strengths.includes('docs')) {
+        score += 15;
+      }
+
+      if (task.targetPaths?.some((path) => path.includes('.github') || path.includes('Dockerfile')) && agentConfig.strengths.includes('ci-cd')) {
+        score += 15;
+      }
+
+      score -= loadRatio * 10;
+
+      return {
+        agent: agentName,
+        score,
+        load: currentLoad,
+      } satisfies CandidateScore;
+    });
+
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+
+      if (a.load !== b.load) {
+        return a.load - b.load;
+      }
+
+      return a.agent.localeCompare(b.agent);
+    });
+
+    return candidates[0]?.agent ?? Object.keys(this.config.agents)[0];
   }
 
   computeRounds(tasks: SubTask[]): SubTask[][] {
@@ -37,14 +88,28 @@ export class Scheduler {
     let remaining = [...tasks];
 
     while (remaining.length > 0) {
-      const ready = remaining.filter((t) => t.dependsOn.every((d) => completed.has(d)));
+      const ready = remaining
+        .filter((task) => task.dependsOn.every((dependency) => completed.has(dependency)))
+        .sort((a, b) => {
+          if (a.dependsOn.length !== b.dependsOn.length) {
+            return a.dependsOn.length - b.dependsOn.length;
+          }
+
+          if ((a.assignedTo ?? '') !== (b.assignedTo ?? '')) {
+            return (a.assignedTo ?? '').localeCompare(b.assignedTo ?? '');
+          }
+
+          return a.id.localeCompare(b.id);
+        });
+
       if (ready.length === 0) {
-        const cycleIds = remaining.map((t) => t.id).join(', ');
+        const cycleIds = remaining.map((task) => task.id).join(', ');
         throw new Error(`Circular dependency detected among tasks: ${cycleIds}`);
       }
+
       rounds.push(ready);
-      for (const t of ready) completed.add(t.id);
-      remaining = remaining.filter((t) => !completed.has(t.id));
+      for (const task of ready) completed.add(task.id);
+      remaining = remaining.filter((task) => !completed.has(task.id));
     }
 
     return rounds;

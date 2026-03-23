@@ -36,7 +36,9 @@ export const DEFAULT_CONFIG: TriAgentConfig = {
   session: {
     require_approval: true,
     log_dir: '.triagent/logs',
+    state_dir: '.triagent/sessions',
     max_retries: 2,
+    task_timeout_ms: 300000,
     tui_refresh_ms: 100,
   },
 };

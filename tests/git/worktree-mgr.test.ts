@@ -36,6 +36,7 @@ describe('WorktreeManager', () => {
     const result = await mgr.create('claude', 'session1');
     expect(existsSync(result.path)).toBe(true);
     expect(result.branch).toBe('triagent/claude-session1');
+    expect(result.path).toContain(join('.triagent', 'worktrees', 'session1', 'claude'));
   });
 
   it('should list active worktrees', async () => {
@@ -43,6 +44,7 @@ describe('WorktreeManager', () => {
     await mgr.create('forge', 'session1');
     const trees = await mgr.list();
     expect(trees.length).toBeGreaterThanOrEqual(2);
+    expect(trees.some((tree) => tree.sessionId === 'session1')).toBe(true);
   });
 
   it('should remove a worktree', async () => {

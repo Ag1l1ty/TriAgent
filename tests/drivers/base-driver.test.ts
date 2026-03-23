@@ -59,4 +59,21 @@ describe('BaseDriver', () => {
     const exitCode = await exitPromise;
     expect(typeof exitCode).toBe('number');
   });
+
+  it('should fail when a task exceeds timeout', async () => {
+    const bus = new TriAgentEventBus({ logging: true });
+    const driver = new BaseDriver({
+      name: 'slow-mock',
+      command: join(FIXTURES, 'mock-agent-slow.sh'),
+      args: [],
+      cwd: '/tmp',
+      bus,
+      refreshMs: 50,
+      timeoutMs: 50,
+    });
+
+    const exitCode = await driver.start('Very slow task');
+    expect(exitCode).toBe(124);
+    expect(bus.getEventLog().some((entry) => entry.event.type === 'agent:error')).toBe(true);
+  });
 });
