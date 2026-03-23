@@ -4,6 +4,14 @@ CLI orchestrator that coordinates 3 AI coding agents (Claude Code, ForgeCode, Co
 
 **Zero API cost** — agents authenticate via existing subscriptions (Claude Code Max, ChatGPT Team, etc.).
 
+## Authentication Model
+
+TriAgent is designed for account-based agent CLIs.
+
+- Claude Code, Codex CLI, ForgeCode, and similar tools should run with the user's existing logged-in account or subscription.
+- TriAgent should not require OpenAI, Anthropic, or other provider API keys for normal operation.
+- Any auth checks should validate CLI session/account access, not raw API key presence.
+
 ## Quick Start
 
 ```bash
@@ -258,6 +266,15 @@ Recommended distribution:
 - npm for installation and updates
 
 Vercel only makes sense if you later build a separate web UI or docs site.
+
+## GitHub Release Flow
+
+This repo includes GitHub Actions for:
+
+- CI on pushes and pull requests
+- Packaging on tags
+- Publishing to npm on `v*` tags when `NPM_TOKEN` is configured in GitHub Actions secrets
+- Attaching the generated `.tgz` package to a GitHub Release
 
 ## Tech Stack
 
